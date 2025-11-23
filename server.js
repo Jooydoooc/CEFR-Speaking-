@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -5,7 +6,7 @@ const fs = require('fs');
 const cors = require('cors');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -17,12 +18,14 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const uploadDir = 'uploads/';
         if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir);
+            fs.mkdirSync(uploadDir, { recursive: true });
         }
         cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
-        const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+        // Sanitize filename
+        const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.\-]/g, '_');
+        const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + '-' + sanitizedName;
         cb(null, uniqueName);
     }
 });
@@ -31,15 +34,30 @@ const upload = multer({
     storage: storage,
     limits: {
         fileSize: 10 * 1024 * 1024 // 10MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        // Basic file filter - allow all file types
+        cb(null, true);
     }
 });
 
-// In-memory storage for file metadata (in real app, use database)
+// In-memory storage for file metadata
 let files = [];
 
 // Routes
+
+// Serve main page
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        message: 'File Manager API is running',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Upload file
@@ -53,18 +71,20 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
         }
 
         const fileInfo = {
-            id: Date.now().toString(),
+            id: generateId(),
             name: req.file.originalname,
             size: req.file.size,
             path: req.file.path,
-            uploadDate: new Date().toISOString()
+            uploadDate: new Date().toISOString(),
+            type: req.file.mimetype
         };
 
         files.push(fileInfo);
 
         res.json({
             message: 'File uploaded successfully',
-            file: fileInfo
+            file: fileInfo,
+            totalFiles: files.length
         });
 
     } catch (error) {
@@ -79,7 +99,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 // Get all files
 app.get('/api/files', (req, res) => {
     try {
-        res.json(files);
+        res.json({
+            files: files,
+            count: files.length
+        });
     } catch (error) {
         console.error('Get files error:', error);
         res.status(500).json({
@@ -145,7 +168,8 @@ app.delete('/api/files/:id', (req, res) => {
         files.splice(fileIndex, 1);
 
         res.json({
-            message: 'File deleted successfully'
+            message: 'File deleted successfully',
+            deletedFile: file.name
         });
 
     } catch (error) {
@@ -157,12 +181,60 @@ app.delete('/api/files/:id', (req, res) => {
     }
 });
 
+// Clear all files (for testing)
+app.delete('/api/files', (req, res) => {
+    try {
+        // Remove all files from filesystem
+        files.forEach(file => {
+            if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+            }
+        });
+
+        const deletedCount = files.length;
+        files = [];
+
+        res.json({
+            message: 'All files deleted successfully',
+            deletedCount: deletedCount
+        });
+
+    } catch (error) {
+        console.error('Clear files error:', error);
+        res.status(500).json({
+            error: 'Internal server error',
+            code: 'CLEAR_ERROR'
+        });
+    }
+});
+
 // 404 handler for API routes
 app.use('/api/*', (req, res) => {
     res.status(404).json({
         error: 'API endpoint not found',
         code: 'NOT_FOUND',
-        path: req.originalUrl
+        path: req.originalUrl,
+        availableEndpoints: [
+            'GET /api/health',
+            'POST /api/upload',
+            'GET /api/files',
+            'GET /api/files/:id',
+            'DELETE /api/files/:id'
+        ]
+    });
+});
+
+// Utility function to generate unique IDs
+function generateId() {
+    return Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+}
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+    console.error('Unhandled error:', error);
+    res.status(500).json({
+        error: 'Something went wrong!',
+        code: 'INTERNAL_ERROR'
     });
 });
 
@@ -170,4 +242,5 @@ app.use('/api/*', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 Server running at http://localhost:${PORT}`);
     console.log(`📁 Upload directory: ./uploads/`);
+    console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
