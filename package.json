@@ -1,0 +1,17 @@
+{
+  "name": "multilevel-speaking-app",
+  "version": "1.0.0",
+  "description": "Multilevel Speaking Practice App",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx serve .",
+    "build": "echo 'No build process needed for static site'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "serve": "^14.0.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
